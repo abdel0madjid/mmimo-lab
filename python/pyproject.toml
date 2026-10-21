@@ -1,0 +1,11 @@
+[project]
+name = "mmimo-lab"
+version = "0.1.0"
+description = "Massive MIMO / beamforming planning lab: SSB beam sets, TM adaptation, MU-BF, strategy advisor"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.22"]
+[project.optional-dependencies]
+dev = ["pytest"]
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

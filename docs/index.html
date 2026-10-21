@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>mMIMO Beamforming 3D Simulator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{--bg:#f4f6f9;--panel:#ffffff;--text:#1b2430;--muted:#5d6b7c;--line:#d5dce5;--accent:#1f7a5c;color-scheme:light;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0e1621;--panel:#16212f;--text:#e6edf5;--muted:#93a3b6;--line:#2a3a4d;--accent:#4fd1a1;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0e1621;--panel:#16212f;--text:#e6edf5;--muted:#93a3b6;--line:#2a3a4d;--accent:#4fd1a1;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.app{display:grid;grid-template-columns:320px 1fr;min-height:100vh}
+aside{background:var(--panel);border-right:1px solid var(--line);padding:16px;overflow-y:auto}
+h1{font-size:17px;margin:0 0 2px}
+.sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+label{display:block;margin:10px 0 3px;font-size:12px;color:var(--muted)}
+label b{color:var(--text);float:right;font-weight:600}
+select,input[type=range]{width:100%}
+select{padding:6px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px}
+input[type=range]{accent-color:var(--accent)}
+.sec{border-top:1px solid var(--line);margin-top:14px;padding-top:4px}
+.chk{display:flex;gap:8px;align-items:center;margin:10px 0;color:var(--text);font-size:13px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.stat{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px}
+.stat span{display:block;color:var(--muted);font-size:11px}
+.stat strong{font-size:15px}
+#view{position:relative;min-height:60vh}
+canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+.hint{position:absolute;left:12px;bottom:10px;color:#aab8c8;font-size:12px;pointer-events:none}
+.tag{position:absolute;right:12px;top:10px;color:#dbe6f2;font-size:13px;background:rgba(10,20,32,.6);padding:6px 10px;border-radius:8px}
+.hide{display:none}
+@media(max-width:800px){.app{grid-template-columns:1fr}#view{height:62vh;order:-1}aside{border-right:0}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside>
+  <h1>mMIMO Beamforming 3D</h1>
+  <div class="sub">Planar array (UPA) radiation pattern, simulated live</div>
+
+  <div class="sub"><b>Workflow:</b> 1 Site/AAU → 2 Beam plan (SSB set) → 3 Link and TM adaptation → 4 Live cell KPIs. Start from the “Real cell” preset.</div>
+  <label>Scenario preset</label><select id="scn"><option value="cell">Real cell · FR2 · SSB + TM adaptation + MU-BF</option><option value="stadium">Event · Football match (stadium crowd)</option><option value="concert">Event · Open-air concert (2 crowd zones)</option><option value="exit">Event · Match exit (moving crowd)</option><option value="festival">Event · Festival · FR1 wide area</option><option value="">Custom</option><option value="urban">Dense urban · FR2 · Set #4#4 · TM7</option><option value="hotspot">Hotspot MU · FR2 · hybrid · TM5</option><option value="suburban">Suburban · FR1 · TM4 4×4</option><option value="rural">Rural wide · FR1 L=4 · TM2</option><option value="indoor">Indoor office · FR2 · Set #2#2#2#2 · TM8</option></select>
+  <label>Transmission mode</label>
+  <select id="mode">
+    <option value="single">Single steered beam</option>
+    <option value="ssb">FR2 SSB beam sweep (32 beams)</option>
+    <option value="mu">Multi-user MIMO (2 UEs)</option>
+    <option value="cell">Live cell · real scenario (course workflow)</option><option value="siso">Single antenna (no beamforming)</option>
+  </select>
+
+  <div class="sec" id="arr">
+    <label>Horizontal elements (Nx) <b id="nxv"></b></label><input id="nx" type="range" min="1" max="16" value="8">
+    <label>Vertical elements (Ny) <b id="nyv"></b></label><input id="ny" type="range" min="1" max="16" value="4">
+    <label>Element spacing <b id="dv"></b></label><input id="d" type="range" min="0.3" max="1" step="0.05" value="0.5">
+  </div>
+
+  <div class="sec" data-m="single">
+    <label>Steering azimuth <b id="azv"></b></label><input id="az" type="range" min="-60" max="60" value="20">
+    <label>Steering elevation <b id="elv"></b></label><input id="el" type="range" min="-30" max="30" value="0">
+  </div>
+
+  <div class="sec hide" data-m="ssb">
+    <label>Band / SSB set (L)</label><select id="set"><option value="fr1_4">FR1 ≤3 GHz · L=4</option><option value="fr1_8">FR1 3–6 GHz · L=8</option><option value="fr2_32" selected>FR2 · basic set (32, slide)</option><option value="fr2_64">FR2 · L=64</option><option value="s1">FR2 · Set #1 (1 beam)</option><option value="s2">FR2 · Set #2 (2)</option><option value="s4">FR2 · Set #4 (4)</option><option value="s6">FR2 · Set #6 (6)</option><option value="s8">FR2 · Set #8 (8)</option><option value="s44">FR2 · Set #4#4 (8)</option><option value="s53">FR2 · Set #5#3 (8)</option><option value="s62">FR2 · Set #6#2 (8)</option><option value="s332">FR2 · Set #3#3#2 (8)</option><option value="s2222">FR2 · Set #2#2#2#2 (8)</option></select>
+    <label>SSB beam index <b id="bi"></b></label><input id="bidx" type="range" min="0" max="31" value="0">
+    <div id="tbl" style="max-height:130px;overflow:auto;border:1px solid var(--line);border-radius:6px;margin-top:8px"></div>
+    <div class="chk"><input type="checkbox" id="auto" checked><span>Auto sweep</span></div>
+    <div class="chk"><input type="checkbox" id="all"><span>Show all 32 beams (envelope)</span></div>
+  </div>
+
+  <div class="sec hide" data-m="cell">
+    <label>Active UEs <b id="nuv"></b></label><input id="nu" type="range" min="2" max="40" value="8">
+    <label>UE speed <b id="spv"></b></label><input id="sp" type="range" min="0" max="30" value="8">
+    <label>SINR threshold single → dual stream <b id="thv"></b></label><input id="th" type="range" min="-5" max="25" value="10">
+    <div class="chk"><input type="checkbox" id="mub" checked><span>MU beamforming (UE pairing)</span></div>
+    <label>Crowd distribution</label><select id="dist"><option value="uni">Uniform across sector</option><option value="stad">Stadium (one dense cluster)</option><option value="conc">Concert (two zones)</option></select>
+    <div class="chk"><input type="checkbox" id="ref"><span>Beam refinement (+3 dB, 8% CSI-RS overhead)</span></div>
+    <button id="adv" style="width:100%;padding:7px;margin:4px 0;background:var(--accent);color:#06241a;border:0;border-radius:6px;cursor:pointer;font-weight:600">Find best strategy for this scenario</button>
+    <div id="advr" style="font-size:12px;line-height:1.6;margin-bottom:8px"></div>
+    <div id="kpi" style="font-size:12px;line-height:1.7;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px"></div>
+    <canvas id="pm" width="560" height="230" style="width:100%;height:auto;cursor:default;margin-top:8px"></canvas>
+  </div>
+  <div class="sec hide" data-m="mu">
+    <label>Precoder</label>
+    <select id="prec"><option value="zf">Zero-forcing (ZF)</option><option value="mrt">Max ratio (MRT)</option></select>
+    <label>Architecture</label><select id="arch"><option value="dig">Fully digital (RF chain per antenna)</option><option value="hyb">Hybrid (analog subarrays + digital)</option></select>
+    <div id="hyb" class="hide"><label>RF chains <b id="rfv"></b></label><input id="rf" type="range" min="2" max="8" value="4"><label>Phase shifter bits <b id="pbv"></b></label><input id="pb" type="range" min="1" max="6" value="3"></div>
+    <label>UE1 azimuth <b id="a1v"></b></label><input id="a1" type="range" min="-60" max="60" value="-25">
+    <label>UE1 elevation <b id="e1v"></b></label><input id="e1" type="range" min="-30" max="30" value="0">
+    <label>UE2 azimuth <b id="a2v"></b></label><input id="a2" type="range" min="-60" max="60" value="15">
+    <label>UE2 elevation <b id="e2v"></b></label><input id="e2" type="range" min="-30" max="30" value="5">
+  </div>
+
+  <div class="sec" id="lnk">
+    <label>Transmission mode (TM)</label><select id="tm"><option value="auto">Auto (best rank)</option><option value="1">TM1 · single antenna</option><option value="2">TM2 · Tx diversity</option><option value="3">TM3 · open-loop SM</option><option value="4">TM4 · closed-loop SM</option><option value="5">TM5 · MU-MIMO</option><option value="6">TM6 · CL rank-1 precoding</option><option value="7">TM7 · UE-specific beamforming</option><option value="8">TM8 · dual-layer beamforming</option></select>
+    <label>Band</label><select id="band"><option value="fr1">FR1 · 3.5 GHz · 100 MHz</option><option value="fr2" selected>FR2 · 28 GHz · 400 MHz</option></select>
+    <label>Channel (3GPP UMi)</label><select id="chn"><option value="nlos" selected>NLOS</option><option value="los">LOS (Rician K≈9 dB)</option></select>
+    <label>MIMO config</label><select id="mimo"><option value="2">2×2</option><option value="4" selected>4×4</option><option value="8">8×8</option></select>
+    <label>Tx power <b id="pv"></b></label><input id="pw" type="range" min="10" max="50" value="30">
+    <label>UE distance <b id="dsv"></b></label><input id="ds" type="range" min="10" max="500" value="100">
+    <label>Channel correlation ρ <b id="rv"></b></label><input id="rho" type="range" min="0" max="0.95" step="0.05" value="0.3">
+    <div class="chk"><input type="checkbox" id="fad"><span>Fast fading over time</span></div>
+    <button id="nr" style="width:100%;padding:6px;margin:4px 0;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;cursor:pointer">New channel realization</button>
+    <div class="chk" id="mvrow"><input type="checkbox" id="mv"><span>Moving UE (green)</span></div>
+    <div class="chk" id="trrow"><input type="checkbox" id="trk" checked><span>Beam tracking</span></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><span>Elements</span><strong id="sN"></strong></div>
+    <div class="stat"><span>Array gain</span><strong id="sG"></strong></div>
+    <div class="stat"><span>HPBW az / el</span><strong id="sB"></strong></div>
+    <div class="stat"><span id="sXl">Beam direction</span><strong id="sX"></strong></div>
+    <div class="stat"><span>SINR</span><strong id="sS"></strong></div>
+    <div class="stat"><span>Throughput</span><strong id="sR"></strong></div>
+    <div class="stat" style="grid-column:span 2"><span>Selected gain type</span><strong id="sM"></strong></div>
+    <div class="stat" style="grid-column:span 2"><span>Throughput vs peak</span><div style="height:10px;background:var(--line);border-radius:5px;margin:6px 0"><div id="tg" style="height:100%;width:0;background:var(--accent);border-radius:5px"></div></div><strong id="tgt" style="font-size:13px"></strong></div>
+    <div class="stat" style="grid-column:span 2"><span>Channel eigenmodes (σ²/M, active = green)</span><div id="eig" style="display:flex;gap:3px;align-items:flex-end;height:46px;margin-top:4px"></div></div>
+    <div class="stat" style="grid-column:span 2"><span>Mode and throughput vs UE distance (dashed = current)</span><canvas id="lc" width="560" height="270" style="width:100%;height:auto;cursor:default"></canvas></div>
+  </div>
+  <div class="sub" style="margin-top:12px">Spacing above 0.5λ can create grating lobes. 3GPP defines SSB indices (L=4/8 in FR1, L=64 in FR2) but not beam angles, so directions here are derived from the slide’s sector (±60° az, ±22.5° el). Link model: TR 38.901 UMi path loss, Rician K for LOS, Shannon with 2 dB gap. Hybrid: each RF chain drives a subarray with quantized phase shifters, plus a digital ZF/MRT layer.</div>
+</aside>
+<div id="view"><canvas id="c"></canvas><div class="tag" id="tag"></div><div class="hint">Drag to rotate · scroll to zoom</div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const S={mode:'single'};
+const R=4, SC=0.26, NA=73, NE=61, D2R=Math.PI/180;
+// ---- three setup
+const cv=$('c'), view=$('view');
+const renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true});
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x0f1b2b);
+const cam=new THREE.PerspectiveCamera(45,1,0.1,100);
+scene.add(new THREE.AmbientLight(0xffffff,0.55));
+const dl=new THREE.DirectionalLight(0xffffff,0.8); dl.position.set(5,8,6); scene.add(dl);
+const grid=new THREE.GridHelper(14,14,0x3a5068,0x22344a); grid.position.y=-2.6; scene.add(grid);
+const world=new THREE.Group(); world.rotation.x=-Math.PI/2; scene.add(world); // physics: x broadside, y horiz, z up
+const panelG=new THREE.Group(); world.add(panelG);
+const markG=new THREE.Group(); world.add(markG);
+
+// pattern mesh
+const geo=new THREE.BufferGeometry();
+const pos=new Float32Array(NA*NE*3), col=new Float32Array(NA*NE*3);
+const idx=[];
+for(let i=0;i<NA-1;i++)for(let j=0;j<NE-1;j++){const a=i*NE+j,b=(i+1)*NE+j,c=a+1,d=b+1;idx.push(a,b,c,b,d,c);}
+geo.setIndex(idx);
+geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+const mesh=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({vertexColors:true,side:THREE.DoubleSide,transparent:true,opacity:0.88,shininess:40}));
+world.add(mesh);
+const wire=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0xffffff,wireframe:true,transparent:true,opacity:0.06}));
+world.add(wire);
+
+// precomputed directions
+const U=new Float32Array(NA*NE), V=new Float32Array(NA*NE), DX=new Float32Array(NA*NE), DY=new Float32Array(NA*NE), DZ=new Float32Array(NA*NE);
+for(let i=0;i<NA;i++)for(let j=0;j<NE;j++){
+  const ph=(-90+i*180/(NA-1))*D2R, th=(-90+j*180/(NE-1))*D2R, k=i*NE+j;
+  DX[k]=Math.cos(th)*Math.cos(ph); DY[k]=Math.cos(th)*Math.sin(ph); DZ[k]=Math.sin(th);
+  U[k]=DY[k]; V[k]=DZ[k];
+}
+// ---- math
+const uv=(az,el)=>[Math.sin(az*D2R)*Math.cos(el*D2R), Math.sin(el*D2R)];
+function afLin(n,d,delta){ // normalized |sum exp(j*2pi*d*m*delta)|/n
+  if(n<=1)return 1; const psi=Math.PI*d*delta*2, s=Math.sin(psi/2);
+  if(Math.abs(s)<1e-6)return 1; return Math.abs(Math.sin(n*psi/2)/(n*s));
+}
+let CH={M:0,ver:0,sf:0};
+const rn=()=>{let u=0;while(!u)u=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*Math.random());};
+function newReal(M,full){if(full||CH.M!==M){CH.M=M;const m=()=>[...Array(M)];CH.W=m().map(()=>m().map(()=>[rn()/1.414,rn()/1.414]));CH.pr=m().map(()=>6.28*Math.random());CH.pt=m().map(()=>6.28*Math.random());CH.sf=CH.init?Math.max(-1.5,Math.min(1.5,rn())):0;CH.init=1;}CH.ver++;}
+function fade(al){const b=Math.sqrt(1-al*al);for(const r of CH.W||[])for(const w of r){w[0]=al*w[0]+b*rn()/1.414;w[1]=al*w[1]+b*rn()/1.414;}CH.ver++;}
+function chol(M,r){const L=[];for(let i=0;i<M;i++){L.push(new Array(M).fill(0));for(let j=0;j<=i;j++){let s=Math.pow(r,i-j);for(let k=0;k<j;k++)s-=L[i][k]*L[j][k];L[i][j]=i===j?Math.sqrt(Math.max(s,1e-9)):s/L[j][j];}}return L;}
+function jac(A){const n=A.length;for(let sw=0;sw<30;sw++){let off=0;for(let i=0;i<n;i++)for(let j=i+1;j<n;j++)off+=A[i][j]*A[i][j];if(off<1e-10)break;for(let p=0;p<n;p++)for(let q=p+1;q<n;q++){if(Math.abs(A[p][q])<1e-14)continue;const th=(A[q][q]-A[p][p])/(2*A[p][q]),t=Math.sign(th||1)/(Math.abs(th)+Math.sqrt(th*th+1)),c=1/Math.sqrt(t*t+1),s=t*c;for(let k=0;k<n;k++){const x=A[k][p],y=A[k][q];A[k][p]=c*x-s*y;A[k][q]=s*x+c*y;}for(let k=0;k<n;k++){const x=A[p][k],y=A[q][k];A[p][k]=c*x-s*y;A[q][k]=s*x+c*y;}}}return A.map((r,i)=>r[i]);}
+function chanLam(M,rho,los){ // H = sqrt(K/(K+1)) LOS + sqrt(1/(K+1)) Rr^1/2 W Rt^1/2 ; eigenvalues of H H^H / M
+  if(CH.M!==M)newReal(M,true);
+  const key=[M,rho,los,CH.ver].join();if(CH.key===key)return CH.lam;
+  const K=los?7.94:0,a=Math.sqrt(K/(K+1)),b=Math.sqrt(1/(K+1)),L=chol(M,rho),n=2*M,B=[...Array(n)].map(()=>new Array(n).fill(0));
+  for(let i=0;i<M;i++)for(let j=0;j<M;j++){let re=0,im=0;for(let k=0;k<M;k++){let tr=0,ti=0;for(let l=0;l<=i;l++){tr+=L[i][l]*CH.W[l][k][0];ti+=L[i][l]*CH.W[l][k][1];}re+=tr*L[j][k]*(k<=j?1:0);im+=ti*L[j][k]*(k<=j?1:0);}
+    const ph=CH.pr[i]-CH.pt[j],hr=b*re+a*Math.cos(ph),hi=b*im+a*Math.sin(ph);B[i][j]=hr;B[i][j+M]=-hi;B[i+M][j]=hi;B[i+M][j+M]=hr;}
+  const A=[...Array(n)].map((_,i)=>[...Array(n)].map((_,j)=>{let s=0;for(let k=0;k<n;k++)s+=B[k][i]*B[k][j];return s;}));
+  const ev=jac(A).sort((x,y)=>y-x);CH.lam=[...Array(M)].map((_,i)=>Math.max(0,ev[2*i])/M);CH.key=key;return CH.lam;
+}
+const SETR={s1:[1],s2:[2],s4:[4],s6:[6],s8:[8],s44:[4,4],s53:[5,3],s62:[6,2],s332:[3,3,2],s2222:[2,2,2,2]};
+let UES=[],KP={};
+const TMS={TM2:'#5b8def',TM3:'#3fb68b',TM7:'#e3b341',TM8:'#f0883e','MU-BF':'#e5534b'};
+const rr=(a,b)=>a+Math.random()*(b-a);
+const spawnAz=()=>{const k=$('dist').value;return k==='stad'?rr(-15,15):k==='conc'?(Math.random()<.5?-28:28)+rr(-9,9):rr(-55,55);};
+function advise(){ // try SSB set x MU-BF x refinement on identical crowds, rank by cell and cell-edge throughput
+  const keep={set:$('set').value,mub:$('mub').checked,ref:$('ref').checked},res=[],r0=Math.random;
+  try{for(const s of ['s1','s4','s6','s8','s44','s53','s62','s332','s2222'])for(const m of [0,1])for(const r of [0,1]){
+    $('set').value=s;$('mub').checked=!!m;$('ref').checked=!!r;let sd=777;Math.random=()=>(sd=(sd*1664525+1013904223)%4294967296)/4294967296;
+    cellStep(true);let a=0,e=0,l=0;const T=15;for(let i=0;i<T;i++){const o=cellStep();a+=o.tot;e+=o.edge;l+=o.lay;}
+    res.push({s,m,r,tot:a/T,edge:e/T,lay:l/T});}
+  }finally{Math.random=r0;$('set').value=keep.set;$('mub').checked=keep.mub;$('ref').checked=keep.ref;$('set').onchange();}
+  const mt=Math.max(...res.map(x=>x.tot)),me=Math.max(...res.map(x=>x.edge))||1,base=res.find(x=>x.s==='s1'&&!x.m&&!x.r);
+  res.forEach(x=>x.sc=0.6*x.tot/mt+0.4*x.edge/me);res.sort((a,b)=>b.sc-a.sc);
+  const nm=x=>'Set '+x.s.replace('s','#')+(x.m?' + MU-BF':'')+(x.r?' + refinement':'');
+  const w=res[0],gain=Math.round(100*(w.tot/base.tot-1));
+  $('advr').innerHTML=`<b>Recommended: ${nm(w)}</b><br>Cell ${Math.round(w.tot)} Mbps (${gain>=0?'+':''}${gain}% vs single wide beam) · edge UE ${Math.round(w.edge)} Mbps · ${w.lay.toFixed(1)} layers<br><span style="color:var(--muted)">Runners-up:</span><br>`+res.slice(1,4).map(x=>`${nm(x)}: ${Math.round(x.tot)} / ${Math.round(x.edge)} Mbps`).join('<br>')+`<br><span style="color:var(--muted)">Score = 60% cell + 40% edge throughput.</span>`;
+}
+function cellStep(reset){ // course workflow: beam selection -> TM adaptation -> UE pairing -> KPIs
+  const nu=+$('nu').value,{nx,ny,d}=params(),nb=ssbN(),M=+$('mimo').value,fr2=$('band').value==='fr2',los=$('chn').value==='los',pw=+$('pw').value,sp=+$('sp').value,th=+$('th').value;
+  if(reset||!KP.ticks){UES=[];KP={ticks:1,sw:0,tm:{},pairs:0,att:0};}
+  while(UES.length<nu)UES.push({az:spawnAz(),el:rr(-12,4),d:rr(0.25*(+$('ds').value),+$('ds').value),v:Math.random()<.5?-1:1,sb:-1,tm:'TM7'});
+  UES.length=nu;$('nuv').textContent=nu;$('spv').textContent=sp+' km/h';$('thv').textContent=th+' dB';
+  const f=fr2?28:3.5,bw=fr2?4e8:1e8,nz=-174+10*Math.log10(bw)+(fr2?9:7)+3-(fr2?5:0),lam=chanLam(M,+$('rho').value,los);
+  const bm=[];for(let b=0;b<nb;b++){const B=ssbBeam(b),[X,Y]=subA(B,nx,ny),[u0,v0]=uv(B.az,B.el);bm.push({u0,v0,X,Y,az:B.az});}
+  for(const u of UES){
+    u.az+=u.v*sp/40;if(Math.abs(u.az)>58)u.v*=-1;u.d=Math.min(+$('ds').value,Math.max(15,u.d+rr(-3,3)));
+    const [uu,vv]=uv(u.az,u.el),cs=Math.max(0,Math.cos(u.az*D2R)*Math.cos(u.el*D2R));
+    const g=bm.map(m=>m.X*m.Y*Math.pow(afLin(m.X,d,uu-m.u0)*afLin(m.Y,d,vv-m.v0),2));
+    let best=0;g.forEach((x,i)=>{if(x>g[best])best=i;});
+    if(u.sb<0||u.sb>=nb)u.sb=best;else if(g[best]>g[u.sb]*2){u.sb=best;KP.sw++;} // 3 dB hysteresis beam change
+    const d3=Math.hypot(u.d,8.5),p0=32.4+21*Math.log10(d3)+20*Math.log10(f),pl=los?p0:Math.max(p0,35.3*Math.log10(d3)+22.4+21.3*Math.log10(f));
+    u.snr=Math.pow(10,(pw-pl-nz)/10)*g[u.sb]*cs*3.16*($('ref').checked?2:1);
+  }
+  const grp=[];[...UES].sort((a,b)=>b.snr-a.snr).forEach(u=>{const G=$('mub').checked&&grp.find(h=>h.length<Math.max(2,Math.min(8,nx*ny>>3))&&h.every(w=>Math.hypot(w.az-u.az,1.5*(w.el-u.el))>Math.max(5,90/nx)));G?G.push(u):grp.push([u]);});
+  let tot=0,lay=0,sd0=0,pr=0;
+  for(const G of grp)for(const u of G){
+    const sn=u.snr/(1+0.35*(G.length-1));u.sinr=10*Math.log10(Math.max(sn,1e-9));
+    u.tm=u.sinr<0?'TM2':(sp>=20&&u.sinr>5)?'TM3':u.sinr<th?'TM7':'TM8';
+    const r=tmRate(u.tm.slice(2),sn/1.6,lam,M);u.thr=r[0]*bw/1e6/grp.length*($('ref').checked?0.92:1);u.lbl=G.length>1?'MU-BF':u.tm;
+    tot+=u.thr;lay+=r[1]/grp.length;sd0+=u.sinr;if(G.length>1)pr++;
+    KP.tm[u.lbl]=(KP.tm[u.lbl]||0)+1/grp.length;
+  }
+  KP.ticks++;KP.pairs+=pr;KP.att+=nu;
+  const sh=Object.values(KP.tm).reduce((a,b)=>a+b,0)||1,eirp=pw+10*Math.log10(nx*ny)+5;
+  $('kpi').innerHTML=`Cell throughput: <b>${Math.round(tot)} Mbps</b> · per UE ${Math.round(tot/nu)} Mbps<br>Avg SINR: <b>${(sd0/nu).toFixed(1)} dB</b> · avg layers per PRB: <b>${lay.toFixed(2)}</b><br>MU pairing success: <b>${Math.round(100*KP.pairs/KP.att)}%</b> · beam changes: <b>${KP.sw}</b><br>PRB share: `+Object.keys(KP.tm).map(k=>`<span style="color:${TMS[k]}">${k} ${Math.round(100*KP.tm[k]/sh)}%</span>`).join(' · ')+`<br>Traffic-beam EIRP ≈ ${eirp.toFixed(0)} dBm (${nb} SSB beams)`;
+  $('sS').textContent=(sd0/nu).toFixed(1)+' dB';$('sR').textContent=Math.round(tot)+' Mbps';$('sM').textContent='Cell mix: '+Object.keys(KP.tm).join(' / ');
+  const c=$('pm').getContext('2d'),W=560,H=230,ox=W/2,oy=H-6,R=205;c.clearRect(0,0,W,H);
+  c.strokeStyle='#8a97a8';c.fillStyle='#8a97a8';c.lineWidth=1;c.globalAlpha=0.35;
+  bm.forEach(m=>{const a=m.az*D2R;c.beginPath();c.moveTo(ox,oy);c.lineTo(ox+R*Math.sin(a),oy-R*Math.cos(a));c.stroke();});
+  c.beginPath();c.arc(ox,oy,R,-Math.PI/2-1.05,-Math.PI/2+1.05);c.stroke();c.globalAlpha=1;
+  for(const u of UES){const a=u.az*D2R,r=u.d/Math.max(+$('ds').value,1)*R,x=ox+r*Math.sin(a),y=oy-r*Math.cos(a),m=bm[u.sb]||bm[0],bq=m.az*D2R;
+    c.strokeStyle=TMS[u.lbl]||'#fff';c.globalAlpha=0.5;c.beginPath();c.moveTo(ox+R*Math.sin(bq)*0.2,oy-R*Math.cos(bq)*0.2);c.lineTo(x,y);c.stroke();c.globalAlpha=1;
+    c.fillStyle=TMS[u.lbl]||'#fff';c.beginPath();c.arc(x,y,5,0,7);c.fill();c.fillStyle='#8a97a8';c.font='11px system-ui';c.fillText('b'+u.sb,x+7,y+4);}
+  const t5=UES.map(u=>u.thr).sort((a,b)=>a-b);return{tot,lay,edge:t5[Math.floor(t5.length*0.1)]};
+}
+const ssbN=()=>SETR[$('set').value]?SETR[$('set').value].reduce((a,b)=>a+b,0):({fr1_4:4,fr1_8:8,fr2_32:32,fr2_64:64})[$('set').value];
+const subA=(B,nx,ny)=>[B.X?Math.min(nx,B.X):B.wide?Math.min(nx,2):nx,B.Y?Math.min(ny,B.Y):B.wide?Math.min(ny,2):ny];
+function tmRate(tm,s,lam,M){ // [bit/s/Hz, layers] per LTE/NR transmission mode
+  const cap=x=>Math.min(7.4,Math.log2(1+x))*0.75,sum=lam.reduce((a,b)=>a+b,0);
+  const sm=(rmax,pen)=>{let b=[0,1];for(let r=1;r<=Math.min(M,rmax);r++){let t=0;for(let k=0;k<r;k++)t+=cap(s*pen*lam[k]/r);if(t>b[0])b=[t,r];}return b;};
+  if(tm==='1')return[cap(s),1];
+  if(tm==='2')return[cap(s*sum),1];
+  if(tm==='3')return sm(M,0.6);
+  if(tm==='4')return sm(M,1);
+  if(tm==='5'||tm==='6'||tm==='7')return[cap(s*lam[0]),1];
+  if(tm==='8')return sm(2,1);
+  return null;}
+const ue=()=>uv(ueAz,+$('el').value);
+function ssbBeam(i){
+  const s=$('set').value;
+  if(SETR[s]){const rw=SETR[s];let r=0,k=i;while(r<rw.length-1&&k>=rw[r]){k-=rw[r];r++;}const R=rw.length,n=rw[r],o=x=>Math.round(x*10)/10;return{az:o(-60+120*(k+.5)/n),el:R==1?0:o(22.5-45*(r+.5)/R),X:Math.max(1,Math.round(.85*n)),Y:Math.max(1,Math.round(2.27*R))};}
+  if(s==='fr1_4')return{az:-45+30*i,el:0};
+  if(s==='fr1_8')return{az:-52.5+15*i,el:0};
+  if(s==='fr2_64')return{az:-56.25+7.5*(i%16),el:15-10*Math.floor(i/16)};
+  if(i<16)return{az:-56.25+7.5*i,el:0,wide:false};
+  if(i<31)return{az:-52.5+7.5*(i-16),el:-12,wide:false};
+  return{az:0,el:-30,wide:true};
+}
+function params(){
+  let nx=+$('nx').value, ny=+$('ny').value; const d=+$('d').value;
+  if(S.mode==='siso'){nx=1;ny=1;}
+  return{nx,ny,d};
+}
+function sepAmp(nx,ny,d,u0,v0,k){return afLin(nx,d,U[k]-u0)*afLin(ny,d,V[k]-v0);}
+
+function elemPos(nx,ny,d){const e=[];for(let m=0;m<nx;m++)for(let n=0;n<ny;n++)e.push([(m-(nx-1)/2)*d,(n-(ny-1)/2)*d]);return e;}
+
+let info={};
+function link(){
+  const N=info.N,pw=+$('pw').value,dm=+$('ds').value,fr2=$('band').value==='fr2',M=+$('mimo').value,rho0=+$('rho').value,mod=S.mode,los0=$('chn').value==='los',rho=rho0+(1-rho0)*(los0?0.89:0);
+  const f=fr2?28e9:3.5e9,bw=fr2?4e8:1e8;
+  const fc=f/1e9,plf=dd=>{const d3=Math.hypot(dd,8.5),plL=32.4+21*Math.log10(d3)+20*Math.log10(fc),plN=Math.max(plL,35.3*Math.log10(d3)+22.4+21.3*Math.log10(fc));
+  return (los0?plL:plN)+(fr2?0.1*dd/100:0)+CH.sf*(los0?4:7.82);}, pl=plf(dm), nz=-174+10*Math.log10(bw)+(fr2?9:7)+3-(fr2?5:0);
+  const Ge=3.16, cs=(a,e)=>Math.max(0,Math.cos(a*D2R)*Math.cos(e*D2R));
+  const rt=s=>{const lam=chanLam(M,rho0,los0),tmr=tmRate($('tm').value,s,lam,M);if(tmr)return tmr;let best=[Math.min(7.4,Math.log2(1+s*lam.reduce((x,y)=>x+y,0)))*0.75,1];for(let r=2;r<=M;r++){let t=0;for(let k=0;k<r;k++)t+=Math.min(7.4,Math.log2(1+s*lam[k]/r));t*=0.75;if(t>best[0])best=[t,r];}return best;};
+  const rt0=s=>{ // legacy
+    let best=[Math.min(7.4,Math.log2(1+s*(1+(M-1)*(1-rho))))*0.75,1];
+    const lam=[];let z=0;for(let k=0;k<M;k++){lam.push(Math.pow(rho,k));z+=lam[k];}
+    for(let r=2;r<=M;r++){let t=0;for(let k=0;k<r;k++)t+=Math.min(7.4,Math.log2(1+s*lam[k]*M/z/r));t*=0.75;if(t>best[0])best=[t,r];}
+    return best;};
+  const baseF=dd=>Math.pow(10,(pw-(mod==='mu'?3:0)-plf(dd)-nz)/10),base=baseF(dm);
+  let sn=[],sg=1,ig=0;
+  if(mod==='mu'){const P=info.P,c1=cs(info.az1,info.el1),c2=cs(info.az2,info.el2);
+    sg=N*P[0]*c1*Ge;ig=N*P[2]*c1*Ge;sn=[base*N*P[0]*c1*Ge/(1+base*N*P[2]*c1*Ge), base*N*P[3]*c2*Ge/(1+base*N*P[1]*c2*Ge)];}
+  else{const mv=$('mv').checked&&mod!=='siso',pa=mod==='siso'?0:(mv?ueAz:info.az),pe=mod==='siso'?0:(mv?+$('el').value:info.el);
+    let a=1;if(mod!=='siso'){const [u0,v0]=uv(info.az,info.el),[u1,v1]=uv(pa,pe);const sb=mod==='ssb'&&info.sub?info.sub:[info.nx,info.ny];a=afLin(sb[0],info.d,u1-u0)*afLin(sb[1],info.d,v1-v0);}
+    sg=(mod==='ssb'&&info.sub?info.sub[0]*info.sub[1]:N)*a*a*cs(pa,pe)*Ge;sn=[base*sg];}
+  const res=sn.map(s=>rt(s/1.6)), tot=res.reduce((x,y)=>x+y[0],0)*bw/1e6;
+  $('sS').textContent=sn.map(x=>(10*Math.log10(Math.max(x,1e-9))).toFixed(1)).join(' / ')+' dB';
+  $('sR').textContent=Math.round(tot)+' Mbps';
+  $('sM').textContent=($('tm').value==='auto'?'':'TM'+$('tm').value+' · ')+res.map((x,i)=>(res.length>1?'UE'+(i+1)+': ':'')+(x[1]==1?'Diversity / array gain':'Spatial multiplexing ×'+x[1])).join(' · ');
+  const cols=['','#5b8def','#3fb68b','#e3b341','#f0883e','#e5534b','#b36bd6','#8a8f98','#8a8f98'],peak=M*7.4*0.75*bw/1e6,lam=chanLam(M,rho0,los0);
+  $('sM').style.color=cols[res[0][1]];
+  $('tg').style.width=Math.min(100,tot/(res.length*peak)*100)+'%';
+  $('tgt').textContent=Math.round(tot)+' / '+Math.round(res.length*peak)+' Mbps peak · '+(tot/(bw/1e6)/res.length).toFixed(2)+' bit/s/Hz per UE';
+  $('eig').innerHTML=lam.map((x,i)=>`<div title="mode ${i+1}: ${x.toFixed(2)}" style="flex:1;height:${Math.max(4,x/lam[0]*100)}%;background:${i<res[0][1]?'var(--accent)':'var(--line)'};border-radius:2px"></div>`).join('');
+  const cx=$('lc').getContext('2d'),W=560,Hh=270,ML=44,pwd=W-ML-8,ph=Hh-44,tx=getComputedStyle(document.body).color;
+  const X=d=>ML+(d-10)/490*pwd,Y=v=>10+ph*(1-Math.min(v,peak)/peak);
+  cx.clearRect(0,0,W,Hh);
+  const pts=[];for(let d=10;d<=500;d+=10){const bd=baseF(d),s=bd*sg/(1+bd*ig),r=rt(s/1.6);pts.push([d,r[0]*bw/1e6,r[1]]);}
+  cx.globalAlpha=0.3;for(const p of pts){cx.fillStyle=cols[p[2]];cx.fillRect(X(p[0])-5*pwd/490,10,10*pwd/490,ph);}cx.globalAlpha=1;
+  cx.strokeStyle=tx;cx.lineWidth=2;cx.beginPath();pts.forEach((p,i)=>i?cx.lineTo(X(p[0]),Y(p[1])):cx.moveTo(X(p[0]),Y(p[1])));cx.stroke();
+  cx.setLineDash([4,3]);cx.lineWidth=1;cx.beginPath();cx.moveTo(X(dm),10);cx.lineTo(X(dm),10+ph);cx.stroke();cx.setLineDash([]);
+  cx.fillStyle=tx;cx.font='12px system-ui';cx.fillText(Math.round(peak)+'',2,18);cx.fillText('0',20,10+ph);cx.fillText('Mbps',2,32);
+  cx.fillText('10 m',ML,ph+26);cx.fillText('250',X(250)-10,ph+26);cx.fillText('500 m',W-44,ph+26);
+  for(let r=1;r<=Math.min(M,5);r++){cx.fillStyle=cols[r];cx.fillRect(ML+(r-1)*92,Hh-14,10,10);cx.fillStyle=tx;cx.fillText(r==1?'Diversity':'SM ×'+r,ML+(r-1)*92+14,Hh-5);}
+  $('pv').textContent=pw+' dBm';$('rfv').textContent=$('rf').value;$('pbv').textContent=$('pb').value+' bit';$('dsv').textContent=dm+' m';$('rv').textContent=rho.toFixed(2);
+}
+function computeAmp(){const a=computeAmp0();link();return a;}
+function computeAmp0(){
+  const {nx,ny,d}=params(), N=nx*ny, amp=new Float32Array(NA*NE);
+  info={nx,ny,d,N};
+  if(S.mode==='siso'){ for(let k=0;k<amp.length;k++)amp[k]=1; info.dir='omni'; return amp; }
+  if(S.mode==='single'){
+    const tr=$('mv').checked&&$('trk').checked, az=tr?ueAz:+$('az').value, el=+$('el').value, [u0,v0]=uv(az,el);
+    for(let k=0;k<amp.length;k++)amp[k]=sepAmp(nx,ny,d,u0,v0,k);
+    info.dir=`${az}°, ${el}°`; info.az=az; info.el=el; return amp;
+  }
+  if(S.mode==='ssb'||S.mode==='cell'){
+    let i=Math.min(+$('bidx').value,ssbN()-1);
+    if($('mv').checked){const [uu,vv]=ue();let best=-1,bi=0;for(let b=0;b<ssbN();b++){const B0=ssbBeam(b),[u0,v0]=uv(B0.az,B0.el),[X,Y]=subA(B0,nx,ny),a=afLin(X,d,uu-u0)*afLin(Y,d,vv-v0);if(a>best){best=a;bi=b;}}i=bi;$('bidx').value=i;}
+    const one=b=>{const B=ssbBeam(b),[u0,v0]=uv(B.az,B.el),[X,Y]=subA(B,nx,ny);return[u0,v0,X,Y];};
+    if($('all').checked||S.mode==='cell'){
+      const bs=[];for(let b=0;b<ssbN();b++)bs.push(one(b));
+      for(let k=0;k<amp.length;k++){let m=0;for(const [u0,v0,X,Y] of bs){const a=sepAmp(X,Y,d,u0,v0,k);if(a>m)m=a;}amp[k]=m;}
+    }else{
+      const [u0,v0,X,Y]=one(i); for(let k=0;k<amp.length;k++)amp[k]=sepAmp(X,Y,d,u0,v0,k);
+    }
+    const B=ssbBeam(i); info.dir=`#${i}: ${B.az}°, ${B.el}°`; info.az=B.az; info.el=B.el; info.sub=subA(B,nx,ny); return amp;
+  }
+  // multi-user
+  const a1=+$('a1').value,e1=+$('e1').value,a2=+$('a2').value,e2=+$('e2').value;
+  const [ua,va]=uv(a1,e1),[ub,vb]=uv(a2,e2), E=elemPos(nx,ny,d);
+  const A1=[],A2=[]; // steering vectors
+  for(const [y,z] of E){let p=2*Math.PI*(y*ua+z*va);A1.push([Math.cos(p),Math.sin(p)]);p=2*Math.PI*(y*ub+z*vb);A2.push([Math.cos(p),Math.sin(p)]);}
+  let w1,w2;
+  if($('arch').value==='hyb'){
+    const nrf=Math.max(1,Math.min(+$('rf').value,N)),cz=Math.ceil(N/nrf),Lq=Math.pow(2,+$('pb').value),q=p=>Math.round(p*Lq/(2*Math.PI))*2*Math.PI/Lq,ch=i=>Math.min(nrf-1,Math.floor(i/cz));
+    const wA=E.map((e,i)=>{const [u,v]=ch(i)%2?[ub,vb]:[ua,va],p=q(2*Math.PI*(e[0]*u+e[1]*v));return[Math.cos(p),Math.sin(p)];});
+    const g=(c,u,v)=>{let re=0,im=0;for(let i=0;i<N;i++)if(ch(i)===c){const p=2*Math.PI*(E[i][0]*u+E[i][1]*v),cc=Math.cos(p),s=Math.sin(p);re+=wA[i][0]*cc+wA[i][1]*s;im+=wA[i][0]*s-wA[i][1]*cc;}return[re,im];};
+    const H=[[],[]];for(let c=0;c<nrf;c++){H[0].push(g(c,ua,va));H[1].push(g(c,ub,vb));}
+    const mul=(a,b)=>[a[0]*b[0]-a[1]*b[1],a[0]*b[1]+a[1]*b[0]],cj=a=>[a[0],-a[1]];
+    let g00=0,g11=0,g01=[0,0];for(let c=0;c<nrf;c++){g00+=H[0][c][0]**2+H[0][c][1]**2;g11+=H[1][c][0]**2+H[1][c][1]**2;const t=mul(H[0][c],cj(H[1][c]));g01[0]+=t[0];g01[1]+=t[1];}
+    const det=g00*g11-(g01[0]**2+g01[1]**2),zf=$('prec').value==='zf'&&det>1e-6*g00*g11;
+    const Gi=zf?[[[g11/det,0],[-g01[0]/det,-g01[1]/det]],[[-g01[0]/det,g01[1]/det],[g00/det,0]]]:[[[1,0],[0,0]],[[0,0],[1,0]]];
+    const F=[...Array(nrf).keys()].map(c=>[0,1].map(k=>{let r=[0,0];for(let j=0;j<2;j++){const t=mul(cj(H[j][c]),Gi[j][k]);r[0]+=t[0];r[1]+=t[1];}return r;}));
+    const mk=k=>{let s=0;for(let c=0;c<nrf;c++)s+=F[c][k][0]**2+F[c][k][1]**2;s=Math.sqrt(s)||1;return E.map((e,i)=>{const f=F[ch(i)][k],a=wA[i];return[(f[0]*a[0]+f[1]*a[1])/s,(f[0]*a[1]-f[1]*a[0])/s];});};
+    w1=mk(0);w2=mk(1);
+  }else if($('prec').value==='zf' && N>1){
+    let cr=0,ci=0;for(let i=0;i<N;i++){cr+=A2[i][0]*A1[i][0]+A2[i][1]*A1[i][1];ci+=A2[i][0]*A1[i][1]-A2[i][1]*A1[i][0];}
+    cr/=N;ci/=N;
+    w1=A1.map((a,i)=>[a[0]-(cr*A2[i][0]-ci*A2[i][1]),a[1]-(cr*A2[i][1]+ci*A2[i][0])]);
+    w2=A2.map((a,i)=>[a[0]-(cr*A1[i][0]+ci*A1[i][1]),a[1]-(cr*A1[i][1]-ci*A1[i][0])]);
+  }else{w1=A1;w2=A2;}
+  const nrm=w=>{let s=0;for(const x of w)s+=x[0]*x[0]+x[1]*x[1];s=Math.sqrt(s)||1;return w.map(x=>[x[0]/s,x[1]/s]);};
+  w1=nrm(w1);w2=nrm(w2);
+  const af=(w,u,v)=>{let re=0,im=0;for(let i=0;i<N;i++){const p=2*Math.PI*(E[i][0]*u+E[i][1]*v),c=Math.cos(p),s=Math.sin(p);re+=w[i][0]*c+w[i][1]*s;im+=w[i][0]*s-w[i][1]*c;}return(re*re+im*im)/N;};
+  for(let k=0;k<amp.length;k++)amp[k]=Math.min(1,Math.sqrt(af(w1,U[k],V[k])+af(w2,U[k],V[k])));
+  const own=af(w1,ua,va), leak=af(w1,ub,vb); info.P=[own,leak,af(w2,ua,va),af(w2,ub,vb)];
+  info.dir=`${a1}°/${a2}°`; info.leak=10*Math.log10((leak+1e-9)/(own+1e-9)); info.wA=w1; info.az1=a1;info.el1=e1;info.az2=a2;info.el2=e2;
+  return amp;
+}
+
+function colorOf(a,c){const h=0.62-0.62*Math.min(1,a);c.setHSL(h,0.85,0.35+0.25*a);}
+const tc=new THREE.Color();
+function rebuildPattern(){
+  const amp=computeAmp();
+  for(let k=0;k<amp.length;k++){
+    const E=Math.sqrt(Math.max(0,DX[k])), a=amp[k]*E, r=Math.max(0.02,a)*R;
+    pos[k*3]=DX[k]*r;pos[k*3+1]=DY[k]*r;pos[k*3+2]=DZ[k]*r;
+    colorOf(a,tc);col[k*3]=tc.r;col[k*3+1]=tc.g;col[k*3+2]=tc.b;
+  }
+  geo.attributes.position.needsUpdate=true;geo.attributes.color.needsUpdate=true;
+  geo.computeVertexNormals();geo.computeBoundingSphere();
+  updateStats();
+}
+const goldMat=new THREE.MeshPhongMaterial({color:0xe3b341}), panelMat=new THREE.MeshPhongMaterial({color:0x5b6b7d});
+function rebuildPanel(){
+  while(panelG.children.length)panelG.remove(panelG.children[0]);
+  const {nx,ny,d}=params(), w=Math.max(nx*d*SC,0.25), h=Math.max(ny*d*SC,0.25);
+  const back=new THREE.Mesh(new THREE.BoxGeometry(0.06,w+0.1,h+0.1),panelMat);back.position.x=-0.05;panelG.add(back);
+  const eg=new THREE.BoxGeometry(0.05,0.07,0.07);
+  for(const [y,z] of elemPos(nx,ny,d)){const m=new THREE.Mesh(eg,goldMat);m.position.set(0.0,y*SC,z*SC);panelG.add(m);}
+}
+function marker(az,el,color,label){
+  const [u,v]=uv(az,el), dx=Math.cos(el*D2R)*Math.cos(az*D2R), p=new THREE.Vector3(dx,u,v).multiplyScalar(R*1.12);
+  const s=new THREE.Mesh(new THREE.SphereGeometry(0.12,16,16),new THREE.MeshBasicMaterial({color}));s.position.copy(p);markG.add(s);
+  const l=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),p]),new THREE.LineBasicMaterial({color,transparent:true,opacity:0.5}));markG.add(l);
+}
+function rebuildMarkers(){
+  document.querySelectorAll('#tbl tr[data-i]').forEach(r=>r.style.background=r.dataset.i==$('bidx').value?'var(--line)':'');
+  while(markG.children.length)markG.remove(markG.children[0]);
+  if(S.mode==='mu'){marker(+$('a1').value,+$('e1').value,0x39d0ff);marker(+$('a2').value,+$('e2').value,0xffa047);}
+  else if(S.mode!=='siso'&&!(S.mode==='ssb'&&$('all').checked)){marker(info.az,info.el,0xffffff);}
+  if(S.mode==='cell')UES.forEach(u=>marker(u.az,u.el,TMS[u.lbl]||'#ffffff'));
+  if($('mv').checked&&(S.mode==='single'||S.mode==='ssb'))marker(ueAz,info.el,0x39ff7a);
+}
+const f1=x=>x.toFixed(1);
+function updateStats(){
+  const {nx,ny,d,N}=info;
+  $('sN').textContent=`${nx}×${ny} = ${N}`;
+  $('sG').textContent=`${f1(10*Math.log10(N))} dB`;
+  const hp=n=>n<=1?'—':f1(0.886/(n*d)/D2R*1).replace(/\.0$/,'')+'°';
+  const az=S.mode==='single'?info.az:0; const wide=n=>n<=1?'wide':hp(n);
+  $('sB').textContent=`${wide(nx)} / ${wide(ny)}`;
+  $('sXl').textContent=S.mode==='mu'?'UE1 leakage to UE2':'Beam direction (az, el)';
+  $('sX').textContent=S.mode==='mu'?`${f1(info.leak)} dB`:info.dir;
+  $('tag').textContent={single:'Single steered beam',ssb:'FR2 SSB sweep',mu:'MU-MIMO · '+($('arch').value==='hyb'?'Hybrid · ':'')+$('prec').value.toUpperCase(),siso:'Single antenna',cell:'Live cell · SSB + TM adaptation + MU-BF'}[S.mode];
+  const lab=(i,v,u='°')=>{$(i).textContent=v+u;};
+  lab('nxv',$('nx').value,'');lab('nyv',$('ny').value,'');lab('dv',(+$('d').value).toFixed(2),'λ');
+  lab('azv',$('az').value);lab('elv',$('el').value);lab('bi',$('bidx').value+' / '+(ssbN()-1),'');
+  lab('a1v',$('a1').value);lab('e1v',$('e1').value);lab('a2v',$('a2').value);lab('e2v',$('e2').value);
+}
+function refresh(panel){ if(panel)rebuildPanel(); rebuildPattern(); if(S.mode==='cell')cellStep(true); rebuildMarkers(); }
+function setMode(){
+  S.mode=$('mode').value;
+  document.querySelectorAll('[data-m]').forEach(e=>e.classList.toggle('hide',e.dataset.m!==S.mode));
+  $('arr').classList.toggle('hide',S.mode==='siso');
+  $('mvrow').classList.toggle('hide',S.mode==='mu'||S.mode==='siso');$('trrow').classList.toggle('hide',S.mode!=='single');
+  refresh(true);
+}
+$('mode').onchange=()=>{$('tm').value='auto';setMode();};
+['nx','ny','d'].forEach(i=>$(i).oninput=()=>refresh(true));
+['az','el','a1','e1','a2','e2','prec','all','bidx','arch','rf','pb'].forEach(i=>$(i).oninput=()=>refresh(false));
+$('arch').addEventListener('input',()=>$('hyb').classList.toggle('hide',$('arch').value!=='hyb'));
+$('all').onchange=()=>refresh(false);
+['pw','ds','rho','mimo','band','mv','trk','chn'].forEach(i=>$(i).oninput=()=>refresh(false));
+function buildTbl(){const n=ssbN();let h='<table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="color:var(--muted)"><td>#</td><td>Az</td><td>El</td></tr>';for(let i=0;i<n;i++){const b=ssbBeam(i);h+=`<tr data-i="${i}" style="cursor:pointer"><td>${i}</td><td>${b.az}°</td><td>${b.el}°</td></tr>`;}$('tbl').innerHTML=h+'</table>';}
+const SCN={stadium:{mode:'cell',set:'s44',nx:16,ny:8,ds:200,chn:'los',rho:.2,mimo:4,pw:37,mv:0,tm:'auto',arch:'dig',band:'fr2',nu:32,sp:0,dist:'stad'},concert:{mode:'cell',set:'s62',nx:16,ny:8,ds:250,chn:'nlos',rho:.3,mimo:4,pw:37,mv:0,tm:'auto',arch:'dig',band:'fr2',nu:36,sp:2,dist:'conc'},exit:{mode:'cell',set:'s44',nx:8,ny:8,ds:150,chn:'nlos',rho:.3,mimo:4,pw:34,mv:0,tm:'auto',arch:'dig',band:'fr2',nu:24,sp:25,dist:'uni'},festival:{mode:'cell',set:'fr1_8',nx:8,ny:4,ds:400,chn:'nlos',rho:.3,mimo:4,pw:43,mv:0,tm:'auto',arch:'dig',band:'fr1',nu:24,sp:5,dist:'uni'},cell:{mode:'cell',set:'s44',nx:8,ny:8,nu:8,sp:8,dist:'uni',ds:100,chn:'nlos',rho:.3,mimo:4,pw:34,mv:0,tm:'auto',arch:'dig',band:'fr2'},urban:{mode:'ssb',set:'s44',nx:8,ny:8,ds:80,chn:'nlos',rho:.3,mimo:4,pw:30,mv:1,tm:'7',arch:'dig'},hotspot:{mode:'mu',nx:16,ny:8,ds:60,chn:'los',rho:.2,mimo:4,pw:30,mv:0,tm:'5',arch:'hyb',band:'fr2'},suburban:{mode:'siso',nx:8,ny:4,ds:250,chn:'nlos',rho:.3,mimo:4,pw:38,mv:0,tm:'4',arch:'dig',band:'fr1'},rural:{mode:'ssb',set:'fr1_4',nx:4,ny:4,ds:450,chn:'los',rho:.6,mimo:2,pw:43,mv:0,tm:'2',arch:'dig'},indoor:{mode:'ssb',set:'s2222',nx:4,ny:4,ds:20,chn:'los',rho:.2,mimo:4,pw:20,mv:1,tm:'8',arch:'dig'}};
+$('scn').onchange=()=>{const p=SCN[$('scn').value];if(!p)return;for(const k of ['mode','set','nx','ny','ds','chn','rho','mimo','pw','arch','tm','band','nu','sp','dist'])if(p[k]!==undefined)$(k).value=p[k];$('mv').checked=!!p.mv;$('auto').checked=!p.mv;$('hyb').classList.toggle('hide',$('arch').value!=='hyb');if(p.set)$('set').onchange();if(p.band)$('band').value=p.band;setMode();};
+$('tm').onchange=()=>{const m={'1':'siso','2':'siso','3':'siso','4':'siso','6':'siso','5':'mu','7':'single','8':'single'}[$('tm').value];if(m){$('mode').value=m;setMode();}else refresh(false);};
+$('adv').onclick=advise;$('dist').onchange=()=>cellStep(true);
+$('nr').onclick=()=>{newReal(+$('mimo').value,true);refresh(false);};
+$('tbl').onclick=e=>{const r=e.target.closest('tr[data-i]');if(r){$('auto').checked=false;$('bidx').value=r.dataset.i;refresh(false);}};
+$('set').onchange=()=>{const n=ssbN();$('bidx').max=n-1;if(+$('bidx').value>=n)$('bidx').value=0;$('band').value=$('set').value.startsWith('fr1')?'fr1':'fr2';buildTbl();refresh(false);};
+buildTbl();
+
+// ---- orbit controls
+let theta=0.9,phi=1.15,dist=13;
+function placeCam(){cam.position.set(dist*Math.sin(phi)*Math.cos(theta),dist*Math.cos(phi),dist*Math.sin(phi)*Math.sin(theta));cam.lookAt(0,-0.3,0);}
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);});
+cv.addEventListener('pointermove',e=>{if(!drag)return;theta-=(e.clientX-drag[0])*0.008;phi=Math.min(2.9,Math.max(0.2,phi-(e.clientY-drag[1])*0.008));drag=[e.clientX,e.clientY];placeCam();});
+cv.addEventListener('pointerup',()=>drag=null);
+cv.addEventListener('wheel',e=>{e.preventDefault();dist=Math.min(30,Math.max(5,dist+e.deltaY*0.01));placeCam();},{passive:false});
+function resize(){const w=view.clientWidth,h=view.clientHeight;renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();}
+addEventListener('resize',resize);
+
+let last=0,lastU=0,lastF=0,lastC=0,ueAz=0;
+function loop(t){
+  if(S.mode==='cell'&&t-lastC>250){lastC=t;cellStep();rebuildMarkers();}
+  if($('fad').checked&&t-lastF>250){lastF=t;fade(0.9);refresh(false);}
+  if($('mv').checked&&(S.mode==='single'||S.mode==='ssb')&&t-lastU>90){lastU=t;ueAz=50*Math.sin(t/2500);refresh(false);}
+  if(S.mode==='ssb'&&$('auto').checked&&!$('mv').checked&&!$('all').checked&&t-last>350){last=t;$('bidx').value=(+$('bidx').value+1)%32;refresh(false);}
+  renderer.render(scene,cam);requestAnimationFrame(loop);
+}
+placeCam();resize();$('scn').value='cell';$('scn').onchange();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
