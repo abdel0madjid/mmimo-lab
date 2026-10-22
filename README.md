@@ -30,5 +30,3 @@ The Python port has not yet been cross-validated against external toolchains.
 ## Roadmap
 Adapter for NVIDIA Sionna (TR 38.901 CDL/UMi channels), cross-checks vs MATLAB 5G Toolbox / QuaDRiGa, per-UE fading, inter-cell interference, export of results to the web viewer (JSON or Pyodide).
 
-## License
-MIT. No third-party course material or slides are included.
